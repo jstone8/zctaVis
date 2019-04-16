@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>dva-visualization</title>
+    <script src="lib/d3.v5.min.js"></script>
+    <script src="lib/d3-tip.min.js"></script>
+    <script src="lib/d3-scale-chromatic.v1.min.js"></script>
+    <script src="lib/topojson.v2.min.js"></script>
+    <style type="text/css"> 
+        body {
+            font-family: sans-serif;
+        }
+
+        .center {
+            text-align: center;
+        }
+
+        .title {
+            font-size: 20px;
+            font-weight: bold;
+        }
+
+        .zip :hover {
+            fill: #cb181d;
+        }
+
+        .border {
+            fill: none;
+            stroke: #ffffff;
+            stroke-linejoin: round;
+            stroke-linecap: round;
+        }
+
+        .legendLabel {
+            font-size: 14px;
+        }
+
+        .tooltip {
+            padding: 3px;
+            background: #181818;
+            color: #ffffff;
+            border-radius: 5px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+    </style> 
+</head>
+<body>
+<div class="center" id="mysvg">
+    <div class="title">San Francisco ZIP Code Tabulation Area</div>
+</div>
+<script>
+Promise.all([
+    d3.json('data/sf_zipcode.json'),  // datasf.org
+    d3.csv('data/sf_data_output.csv'),
+]).then(function(datasets) {
+    var field = 'Price';  // Price, Demand, Frequency
+
+    var index = {'Price': 1, 'Demand': 2, 'Frequency': 3},
+        domain_map = {'Price': d3.range(100, 700, 100),
+                      'Demand': d3.range(60, 500, 60),
+                      'Frequency': d3.range(100, 1000, 100)};
+
+    var width = 800, height = 500;
+    var areaInfo = {}, sfMap = datasets[0];
+    var sf_zip_feature = sfMap.objects['San Francisco ZIP Codes'];
+
+    sf_zip_feature['geometries'].forEach(function(d) {
+        areaInfo[d.properties.zip] = [d.properties.zip, 0, 0, 0];
+    });
+
+    datasets[1].forEach(function(d) {
+        areaInfo[d.zipcode] = [d.zipcode, Math.round(+d.avg_price, 0), 
+                               Math.round(+d.avg_review * 100, 2), +d.frequency];
+    });
+    
+    // https://bl.ocks.org/mbostock/4707858    
+    var projection = d3.geoAlbers().scale(1).translate([0, 0]);
+    var path = d3.geoPath().projection(projection);
+
+    var b = path.bounds(topojson.feature(sfMap, sf_zip_feature)),
+        s = .95 / Math.max((b[1][0] - b[0][0]) / width, (b[1][1] - b[0][1]) / height),
+        t = [(width - s * (b[1][0] + b[0][0])) / 2, (height - s * (b[1][1] + b[0][1])) / 2];
+    projection.scale(s).translate(t);
+
+    var color = d3.schemeOranges[9].slice(9 - domain_map[field].length), 
+        colorDomain = domain_map[field],
+        colorScale = d3.scaleThreshold().domain(colorDomain).range(color);
+
+    var mysvg = d3.select('#mysvg').append('svg').attr('class', 'map')
+                  .attr('width', width).attr('height', height);
+
+    var tooltip = d3.tip()
+                    .attr('class', 'tooltip')
+                    .offset([50, 100])
+                    .html(function(d) {
+                        var val = areaInfo[d.properties.zip][index[field]];
+                        if (field == 'Demand') { val /= 100; }
+                        
+                        var res = 'Zip Code: ' + areaInfo[d.properties.zip][0] + '<br />';
+                        res += field + ': ' + val + '<br />';
+                        return res;
+                    });
+
+    mysvg.call(tooltip);
+
+    mysvg.append('g')
+         .attr('class', 'zip')
+         .selectAll('.path')
+         .data(topojson.feature(sfMap, sf_zip_feature).features)
+         .enter().append('path')
+         .attr('d', path)
+         .attr('fill', function(d) { return colorScale(areaInfo[d.properties.zip][index[field]]); })
+         .on('mouseover', tooltip.show)
+         .on('mouseout', tooltip.hide);
+
+    mysvg.append('path')
+         .datum(topojson.mesh(sfMap, sf_zip_feature, function(x, y) { return x !== y; }))
+         .attr('class', 'border')
+         .attr('d', path);
+
+    // Add legend
+    var w = 20, h = 20;
+
+    var legend = mysvg.selectAll('.legend')
+                      .data(colorDomain)
+                      .enter().append('g');
+
+    legend.append('text')
+          .attr('class', 'legendLabel')
+          .attr('x', 700)
+          .attr('y', 300)
+          .text(field);
+
+    legend.append('rect')
+          .attr('x', 700)
+          .attr('y', function(d, i) { return 310 + i * h;})
+          .attr('width', w)
+          .attr('height', h)
+          .style('fill', function(d) { return colorScale(d - 1); });
+
+    legend.append('text')
+          .attr('class', 'legendLabel')
+          .attr('x', 730)
+          .attr('y', function(d, i) { return 315 + (i + 0.5) * h; })
+          .html(function(d, i) {
+              var val = d;
+              if (field == 'Demand') { val /= 100; }
+
+              if (i == 0) { return '<' + val; }
+              else if (i == colorDomain.length - 1) { return '&ge;' + val; }
+              else { return val; }
+          });
+});
+</script>
+</body>
+</html>
